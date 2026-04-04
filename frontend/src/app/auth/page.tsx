@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
 import { Pen } from 'lucide-react';
 
-export default function AuthPage() {
+function AuthForm() {
   const params = useSearchParams();
   const [mode, setMode] = useState<'login' | 'register'>(
     params.get('mode') === 'register' ? 'register' : 'login'
@@ -113,5 +113,13 @@ export default function AuthPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-brand-50"><p className="text-gray-500">Loading...</p></div>}>
+      <AuthForm />
+    </Suspense>
   );
 }

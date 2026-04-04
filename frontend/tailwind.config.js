@@ -4,6 +4,14 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        border: 'hsl(var(--border))',
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        ring: 'hsl(var(--ring))',
         brand: {
           50: '#f0f7ff',
           100: '#e0effe',
@@ -21,6 +29,9 @@ module.exports = {
           500: '#ef6461',
           600: '#e04440',
         },
+      },
+      borderColor: {
+        DEFAULT: 'hsl(var(--border))',
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
