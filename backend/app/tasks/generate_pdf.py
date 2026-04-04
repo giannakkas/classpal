@@ -20,8 +20,7 @@ from app.services.storage import download_file_from_r2, upload_file_to_r2
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-sync_db_url = settings.database_url.replace("+asyncpg", "")
-sync_engine = create_engine(sync_db_url)
+sync_engine = create_engine(settings.sync_database_url)
 SyncSession = sessionmaker(bind=sync_engine)
 
 # Correction style colors (RGBA)

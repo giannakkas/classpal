@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Sync engine for Celery tasks (Celery doesn't support async)
-sync_db_url = settings.database_url.replace("+asyncpg", "")
-sync_engine = create_engine(sync_db_url)
+sync_engine = create_engine(settings.sync_database_url)
 SyncSession = sessionmaker(bind=sync_engine)
 
 

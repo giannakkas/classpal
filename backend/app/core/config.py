@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",")]
 
+    @property
+    def async_database_url(self) -> str:
+        """Convert Railway's postgresql:// to postgresql+asyncpg:// automatically."""
+        url = self.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
+    @property
+    def sync_database_url(self) -> str:
+        """Plain postgresql:// URL for Celery tasks (sync SQLAlchemy)."""
+        url = self.database_url
+        if "+asyncpg" in url:
+            url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return url
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
