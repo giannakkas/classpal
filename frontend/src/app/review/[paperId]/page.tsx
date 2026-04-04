@@ -243,7 +243,7 @@ export default function ReviewPage() {
         <AlertTriangle className="w-10 h-10 text-red-500" />
         <p className="text-red-600 font-medium">Processing failed</p>
         <p className="text-sm text-gray-500">
-          {(paper.ocr_result as any)?.error || 'Unknown error'}
+          {paper.ocr_result?.error || 'Unknown error'}
         </p>
         <button
           onClick={() => router.push('/scan')}

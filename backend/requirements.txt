@@ -37,7 +37,7 @@ weasyprint==63.1
 stripe==11.4.0
 
 # Email
-resend==2.5.0
+resend==2.5.1
 
 # Utilities
 pydantic==2.10.3

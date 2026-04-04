@@ -142,6 +142,7 @@ class PaperResponse(BaseModel):
     processing_status: str
     correction_style: str
     annotations: list[AnnotationData] | None = None
+    ocr_result: dict | None = None
     evaluation_result: dict | None = None
     ai_confidence: float | None = None
     total_score: float | None

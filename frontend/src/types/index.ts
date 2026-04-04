@@ -137,6 +137,7 @@ export interface Paper {
   processing_status: ProcessingStatus;
   correction_style: CorrectionStyle;
   annotations: Annotation[] | null;
+  ocr_result: Record<string, any> | null;
   evaluation_result: GradingResult | null;
   ai_confidence: number | null;
   total_score: number | null;
