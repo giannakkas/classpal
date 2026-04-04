@@ -2,8 +2,8 @@
 
 ## Prerequisites
 - Railway account (railway.app)
-- GitHub repo: `giannakkas/classpal`
-- Domain: your classpal domain
+- GitHub repo: https://github.com/giannakkas/classpal.git
+- Domain: classpal.ai
 - Cloudflare R2 bucket created
 - Stripe account with products/prices created
 - Anthropic API key
