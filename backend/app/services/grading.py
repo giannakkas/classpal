@@ -17,7 +17,13 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+_client = None
+
+def get_anthropic_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    return _client
 
 GRADING_SYSTEM_PROMPT = """You are ClassPal's AI grading engine. You analyze photographs of student papers — typically printed worksheets with handwritten student answers.
 
@@ -151,7 +157,7 @@ async def grade_paper(
     logger.info("Sending paper to Claude Vision for grading...")
 
     try:
-        response = client.messages.create(
+        response = get_anthropic_client().messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
             system=GRADING_SYSTEM_PROMPT,
