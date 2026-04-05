@@ -60,17 +60,22 @@ export default function ScanPage() {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
       setMode('camera');
     } catch (err) {
       setError('Camera access denied. Please allow camera access or upload a file instead.');
     }
   }, []);
+
+  // Assign stream to video element after it renders
+  useEffect(() => {
+    if (mode === 'camera' && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [mode]);
 
   // Camera capture
   const capturePhoto = () => {
