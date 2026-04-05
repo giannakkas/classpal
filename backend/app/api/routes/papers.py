@@ -260,6 +260,7 @@ async def update_annotations(
 
 @router.post("/{paper_id}/finalize", response_model=PaperResponse)
 async def finalize_paper(
+    background_tasks: BackgroundTasks,
     paper_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -277,16 +278,60 @@ async def finalize_paper(
             detail="Paper must be reviewed/corrected before finalizing",
         )
 
-    # Dispatch PDF generation task
-    celery_app.send_task(
-        "app.tasks.generate_pdf.generate_pdf_task",
-        args=[paper_id],
-    )
+    # Generate PDF in background (same server)
+    background_tasks.add_task(generate_pdf_inline, paper_id)
 
     paper.processing_status = "finalized"
     await db.commit()
     await db.refresh(paper)
     return paper
+
+
+def generate_pdf_inline(paper_id: str):
+    """Generate corrected PDF inline (runs in BackgroundTasks threadpool)."""
+    from app.tasks.generate_pdf import render_annotations_on_image
+    import asyncio
+
+    session = SyncSession()
+    try:
+        paper = session.query(Paper).filter(Paper.id == paper_id).first()
+        if not paper:
+            logger.error(f"Paper {paper_id} not found for PDF generation")
+            return
+
+        # Get the image
+        image_url = paper.processed_image_url or paper.original_image_url
+        if image_url.startswith("/local-files/"):
+            key = image_url.replace("/local-files/", "", 1)
+        else:
+            key = image_url.replace(f"{settings.r2_public_url}/", "")
+
+        image_bytes = download_file_from_r2(key)
+        annotations = paper.annotations or []
+
+        logger.info(f"Generating PDF for paper {paper_id} with {len(annotations)} annotations...")
+
+        pdf_bytes = render_annotations_on_image(
+            image_bytes, annotations, paper.correction_style
+        )
+
+        # Save PDF
+        pdf_key = f"papers/{paper.teacher_id}/{paper_id}/corrected.pdf"
+        loop = asyncio.new_event_loop()
+        pdf_url = loop.run_until_complete(
+            upload_file_to_r2(pdf_bytes, pdf_key, "application/pdf")
+        )
+        loop.close()
+
+        paper.corrected_pdf_url = pdf_url
+        paper.finalized_at = datetime.now(timezone.utc)
+        session.commit()
+        logger.info(f"PDF generated for paper {paper_id}: {pdf_url}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate PDF for paper {paper_id}: {e}", exc_info=True)
+    finally:
+        session.close()
 
 
 @router.get("", response_model=list[PaperResponse])

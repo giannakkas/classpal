@@ -166,8 +166,13 @@ async def grade_paper(
     logger.info("Sending paper to Claude Vision for grading...")
 
     try:
+        # Use env var to select model — Opus for best accuracy, Sonnet for speed/cost
+        import os
+        model = os.getenv("GRADING_MODEL", "claude-sonnet-4-20250514")
+        logger.info(f"Using model: {model}")
+
         response = get_anthropic_client().messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=4096,
             system=GRADING_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
