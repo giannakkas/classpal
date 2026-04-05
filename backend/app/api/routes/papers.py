@@ -1,22 +1,147 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, create_engine
+from sqlalchemy.orm import sessionmaker
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.core.usage import check_paper_quota
+from app.core.config import get_settings
 from app.models.user import User
-from app.models.school import Paper
+from app.models.school import Paper, Assignment
 from app.schemas.models import (
     PaperResponse, PaperUpdateAnnotations, PaperStatusResponse,
 )
-from app.services.storage import upload_file_to_r2
-from app.tasks.celery_app import celery_app
+from app.services.storage import upload_file_to_r2, download_file_from_r2
+from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/papers", tags=["papers"])
+
+# Sync DB for background processing (BackgroundTasks runs in threadpool)
+sync_engine = create_engine(settings.sync_database_url)
+SyncSession = sessionmaker(bind=sync_engine)
+
+
+def process_paper_inline(paper_id: str):
+    """Process a paper synchronously (runs in BackgroundTasks threadpool)."""
+    from app.services.image_processing import preprocess_paper, check_image_quality
+    from app.services.grading import grade_paper, grading_result_to_annotations
+    import asyncio
+
+    session = SyncSession()
+    try:
+        paper = session.query(Paper).filter(Paper.id == paper_id).first()
+        if not paper:
+            logger.error(f"Paper {paper_id} not found")
+            return
+
+        paper.processing_status = "processing"
+        paper.processing_started_at = datetime.now(timezone.utc)
+        session.commit()
+
+        # Download original image
+        from app.services.storage import is_r2_configured
+        url = paper.original_image_url
+        if url.startswith("/local-files/"):
+            key = url.replace("/local-files/", "", 1)
+        else:
+            key = url.replace(f"{settings.r2_public_url}/", "")
+
+        image_bytes = download_file_from_r2(key)
+        logger.info(f"Downloaded image for paper {paper_id}: {len(image_bytes)} bytes")
+
+        # Check quality
+        quality = check_image_quality(image_bytes)
+        if not quality["ok"]:
+            paper.processing_status = "failed"
+            paper.ocr_result = {"error": quality["reason"]}
+            session.commit()
+            logger.warning(f"Paper {paper_id} failed quality: {quality['reason']}")
+            return
+
+        # Preprocess
+        logger.info(f"Preprocessing paper {paper_id}...")
+        processed_bytes = preprocess_paper(image_bytes)
+
+        # Upload processed image
+        processed_key = f"papers/{paper.teacher_id}/{paper_id}/processed.jpg"
+        loop = asyncio.new_event_loop()
+        processed_url = loop.run_until_complete(
+            upload_file_to_r2(processed_bytes, processed_key, "image/jpeg")
+        )
+        loop.close()
+        paper.processed_image_url = processed_url
+
+        # Get answer key if available
+        answer_key_data = None
+        answer_key_image_bytes = None
+        if paper.assignment_id:
+            assignment = session.query(Assignment).filter(
+                Assignment.id == paper.assignment_id
+            ).first()
+            if assignment:
+                if assignment.answer_key_data:
+                    answer_key_data = assignment.answer_key_data
+                elif assignment.answer_key_url:
+                    try:
+                        ak_key = assignment.answer_key_url
+                        if ak_key.startswith("/local-files/"):
+                            ak_key = ak_key.replace("/local-files/", "", 1)
+                        else:
+                            ak_key = ak_key.replace(f"{settings.r2_public_url}/", "")
+                        answer_key_image_bytes = download_file_from_r2(ak_key)
+                    except Exception as e:
+                        logger.warning(f"Failed to download answer key: {e}")
+
+        # AI Grading
+        logger.info(f"Grading paper {paper_id} with Claude Vision...")
+        loop = asyncio.new_event_loop()
+        grading_result = loop.run_until_complete(
+            grade_paper(processed_bytes, answer_key_data, answer_key_image_bytes)
+        )
+        loop.close()
+
+        # Convert to annotations
+        annotations = grading_result_to_annotations(grading_result, paper.correction_style)
+
+        # Save results
+        paper.ocr_result = grading_result
+        paper.evaluation_result = grading_result
+        paper.annotations = annotations
+        paper.total_score = grading_result.get("total_score")
+        paper.max_score = grading_result.get("max_score")
+        paper.ai_confidence = grading_result.get("ocr_confidence")
+
+        if paper.total_score and paper.max_score and float(paper.max_score) > 0:
+            paper.percentage = round(float(paper.total_score) / float(paper.max_score) * 100, 1)
+
+        paper.processing_status = "reviewed"
+        paper.processing_completed_at = datetime.now(timezone.utc)
+        session.commit()
+
+        logger.info(
+            f"Paper {paper_id} processed! Score: {paper.total_score}/{paper.max_score}, "
+            f"Questions: {len(grading_result.get('questions', []))}"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to process paper {paper_id}: {e}", exc_info=True)
+        try:
+            paper.processing_status = "failed"
+            paper.ocr_result = {"error": str(e)}
+            session.commit()
+        except Exception:
+            session.rollback()
+    finally:
+        session.close()
 
 
 @router.post("/upload", response_model=PaperResponse, status_code=201)
 async def upload_paper(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     assignment_id: str | None = Form(None),
     student_id: str | None = Form(None),
@@ -59,11 +184,8 @@ async def upload_paper(
     await db.commit()
     await db.refresh(paper)
 
-    # Dispatch async processing task
-    celery_app.send_task(
-        "app.tasks.process_paper.process_paper_task",
-        args=[paper_id],
-    )
+    # Process paper in background (same server, no Celery needed for local storage)
+    background_tasks.add_task(process_paper_inline, paper_id)
 
     return paper
 
