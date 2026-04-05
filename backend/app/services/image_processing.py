@@ -68,37 +68,141 @@ def preprocess_paper(image_bytes: bytes) -> bytes:
 
 
 def try_perspective_correction(img: np.ndarray) -> Optional[np.ndarray]:
-    """Detect paper edges and apply 4-point perspective transform."""
+    """Detect paper edges and apply perspective transform. Uses multiple strategies."""
+    result = None
+    
+    # Strategy 1: Canny edge detection + quadrilateral finding
+    result = _detect_quad_canny(img)
+    if result is not None:
+        logger.info("Auto-crop: Canny quadrilateral detection succeeded")
+        return result
+    
+    # Strategy 2: Adaptive threshold to find white paper region
+    result = _detect_quad_threshold(img)
+    if result is not None:
+        logger.info("Auto-crop: Threshold-based detection succeeded")
+        return result
+    
+    # Strategy 3: Find largest contour bounding box (non-quad fallback)
+    result = _detect_bounding_crop(img)
+    if result is not None:
+        logger.info("Auto-crop: Bounding box crop succeeded")
+        return result
+    
+    logger.info("Auto-crop: No paper detected, using original image")
+    return None
+
+
+def _detect_quad_canny(img: np.ndarray) -> Optional[np.ndarray]:
+    """Strategy 1: Canny edges + find quadrilateral contour."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 50, 150)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    
+    # Try multiple Canny thresholds
+    for low, high in [(30, 100), (50, 150), (75, 200)]:
+        edged = cv2.Canny(blurred, low, high)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        edged = cv2.dilate(edged, kernel, iterations=3)
+        edged = cv2.erode(edged, kernel, iterations=1)
+        
+        contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+        
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        img_area = img.shape[0] * img.shape[1]
+        
+        for contour in contours[:5]:
+            peri = cv2.arcLength(contour, True)
+            # Try different approximation tolerances
+            for eps in [0.02, 0.03, 0.05]:
+                approx = cv2.approxPolyDP(contour, eps * peri, True)
+                if len(approx) == 4:
+                    area = cv2.contourArea(approx)
+                    if area > img_area * 0.15:  # Lowered from 20% to 15%
+                        return four_point_transform(img, approx.reshape(4, 2))
+    
+    return None
 
-    # Dilate edges to close gaps
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    edged = cv2.dilate(edged, kernel, iterations=2)
 
-    # Find contours
-    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def _detect_quad_threshold(img: np.ndarray) -> Optional[np.ndarray]:
+    """Strategy 2: Use adaptive thresholding to find white paper region."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+    
+    # Threshold to find bright regions (paper is usually white/light)
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Clean up
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+    
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
-
-    # Sort by area, take largest
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
-
-    for contour in contours[:5]:
-        peri = cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-
-        # If we found a quadrilateral
+    
+    # Get largest contour
+    largest = max(contours, key=cv2.contourArea)
+    img_area = img.shape[0] * img.shape[1]
+    area = cv2.contourArea(largest)
+    
+    if area < img_area * 0.15:
+        return None
+    
+    peri = cv2.arcLength(largest, True)
+    for eps in [0.02, 0.03, 0.05]:
+        approx = cv2.approxPolyDP(largest, eps * peri, True)
         if len(approx) == 4:
-            area = cv2.contourArea(approx)
-            img_area = img.shape[0] * img.shape[1]
-
-            # Only correct if the detected region is at least 20% of image
-            if area > img_area * 0.2:
-                return four_point_transform(img, approx.reshape(4, 2))
-
+            return four_point_transform(img, approx.reshape(4, 2))
+    
     return None
+
+
+def _detect_bounding_crop(img: np.ndarray) -> Optional[np.ndarray]:
+    """Strategy 3: Fallback - crop to bounding box of largest contour."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    
+    # Use Otsu thresholding
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    
+    largest = max(contours, key=cv2.contourArea)
+    img_area = img.shape[0] * img.shape[1]
+    
+    if cv2.contourArea(largest) < img_area * 0.15:
+        return None
+    
+    # Get minimum area rotated rectangle
+    rect = cv2.minAreaRect(largest)
+    box = cv2.boxPoints(rect)
+    box = np.int32(box)
+    
+    # Get the bounding rectangle (axis-aligned)
+    x, y, w, h = cv2.boundingRect(largest)
+    
+    # Add small padding
+    pad = 10
+    x = max(0, x - pad)
+    y = max(0, y - pad)
+    w = min(img.shape[1] - x, w + 2 * pad)
+    h = min(img.shape[0] - y, h + 2 * pad)
+    
+    # Only crop if it removes at least 5% of the image
+    crop_area = w * h
+    if crop_area > img_area * 0.95:
+        return None  # Barely any cropping, not worth it
+    
+    cropped = img[y:y+h, x:x+w]
+    logger.info(f"Bounding crop: {img.shape[1]}x{img.shape[0]} -> {w}x{h}")
+    return cropped
 
 
 def four_point_transform(img: np.ndarray, pts: np.ndarray) -> np.ndarray:
