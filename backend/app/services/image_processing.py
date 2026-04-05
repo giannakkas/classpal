@@ -53,7 +53,7 @@ def preprocess_paper(image_bytes: bytes) -> bytes:
     img = enhance_contrast(img)
 
     # Step 5: Denoise (light — preserve handwriting)
-    img = cv2.fastNlMeansDenoisingColored(img, None, h=6, hForColorComponents=6)
+    img = cv2.fastNlMeansDenoisingColored(img, None, 6, 6, 7, 21)
 
     # Step 6: Resize to standard output (max 2000px for AI input)
     h, w = img.shape[:2]
