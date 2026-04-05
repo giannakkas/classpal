@@ -1,6 +1,8 @@
 import { TokenResponse } from '@/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Use relative URLs - Next.js rewrites proxy /api/* to the backend
+// This eliminates CORS issues entirely
+const API_URL = '';
 
 class ApiClient {
   private accessToken: string | null = null;
