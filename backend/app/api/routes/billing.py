@@ -11,8 +11,6 @@ import logging
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-stripe.api_key = settings.stripe_secret_key
-
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 TIER_PRICES = {
@@ -26,6 +24,13 @@ TIER_LIMITS = {
     "pro": 500,
     "school": 300,
 }
+
+
+def get_stripe():
+    """Lazy init stripe to avoid crash when key is empty."""
+    if not stripe.api_key:
+        stripe.api_key = settings.stripe_secret_key
+    return stripe
 
 
 @router.post("/checkout")

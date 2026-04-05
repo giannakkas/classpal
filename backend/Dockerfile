@@ -26,5 +26,5 @@ COPY . .
 # Default port
 ENV PORT=8000
 
-# Run migrations (allow failure on first boot) then start server
-CMD bash -c "alembic upgrade head || echo 'Migration warning - will retry on next deploy'; uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 2"
+# Start uvicorn directly (run alembic migrations separately via railway run)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
