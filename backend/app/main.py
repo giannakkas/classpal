@@ -23,6 +23,9 @@ if settings.sentry_dsn:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.info("ClassPal API starting up...")
+    # Create local storage dir for testing
+    import os
+    os.makedirs("/tmp/classpal-papers", exist_ok=True)
     yield
     logging.info("ClassPal API shutting down...")
 
@@ -58,3 +61,16 @@ app.include_router(upload.router, prefix="/api")
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "classpal-api"}
+
+
+# Serve locally stored files (testing without R2)
+from fastapi.responses import FileResponse
+import os
+
+@app.get("/local-files/{path:path}")
+async def serve_local_file(path: str):
+    file_path = os.path.join("/tmp/classpal-papers", path)
+    if not os.path.exists(file_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)

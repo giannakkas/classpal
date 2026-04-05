@@ -38,6 +38,9 @@ STYLE_WIDTHS = {
 
 
 def _url_to_key(url: str) -> str:
+    """Extract storage key from URL (works for both R2 and local files)."""
+    if url.startswith("/local-files/"):
+        return url.replace("/local-files/", "", 1)
     return url.replace(f"{settings.r2_public_url}/", "")
 
 
